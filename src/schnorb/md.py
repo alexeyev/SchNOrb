@@ -1,3 +1,5 @@
+# coding: utf-8
+
 from schnetpack.md.calculators import MDCalculator
 from schnetpack.md.utils import MDUnits
 from schnetpack import Properties

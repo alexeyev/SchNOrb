@@ -1,7 +1,10 @@
+# coding: utf-8
+
 import torch
 import torch.nn as nn
 
 import schnetpack as spk
+
 
 class CosineBasis(nn.Module):
 

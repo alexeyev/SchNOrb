@@ -1,3 +1,5 @@
+# coding: utf-8
+
 import logging
 import os
 
@@ -10,6 +12,7 @@ from ase.units import Ha, Bohr
 from tqdm import tqdm
 
 import schnetpack as spk
+
 from schnorb import SchNOrbProperties
 from schnorb.rotations import OrcaRotator, rand_rotation_matrix
 from schnorb.utils import check_nan_np
