@@ -3,7 +3,6 @@ import argparse
 import logging
 import os
 import sys
-from shutil import copyfile, rmtree
 
 import numpy as np
 import torch
@@ -11,6 +10,8 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data.sampler import RandomSampler
+from shutil import copyfile, rmtree
+
 from tqdm import tqdm
 
 import schnetpack as spk
@@ -23,7 +24,7 @@ from schnorb import SchNOrbProperties
 from schnorb.data import SchNOrbAtomsData
 from schnorb.rotations import OrcaRotator, AimsRotator
 
-logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "TRACE"))
 np.set_printoptions(linewidth=120, precision=3, suppress=True)
 
 

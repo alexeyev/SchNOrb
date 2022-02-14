@@ -63,4 +63,4 @@ def tensor_meta_data(tensor):
 def print_tensors():
     for obj in gc.get_objects():
         if torch.is_tensor(obj):
-            print(tensor_meta_data(obj))
+            print("tensor_meta_data", tensor_meta_data(obj))

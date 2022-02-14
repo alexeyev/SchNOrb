@@ -1,4 +1,3 @@
 quaternion>=3.5.2.post4
-spherical_functions>=2020.8.18.15.37.20
-torch>=1.10.0
-schnetpack>=1.0.0
+spherical_functions
+schnetpack==0.3
