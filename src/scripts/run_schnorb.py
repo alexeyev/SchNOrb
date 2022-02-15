@@ -450,115 +450,155 @@ def export_model(args, basisdef, orbital_energies, mean, stddev):
 
 
 if __name__ == '__main__':
-    parser = get_parser()
-    args = parser.parse_args()
 
-    argparse_dict = vars(args)
-    jsonpath = os.path.join(args.modelpath, 'args.json')
+    hamiltonian_data = SchNOrbAtomsData("../example_data/h2o_hamiltonians.db")
+    train_loader = spk.data.AtomsLoader(hamiltonian_data, batch_size=1, num_workers=1)
 
-    if args.mode == 'train':
-        if args.overwrite and os.path.exists(args.modelpath):
-            rmtree(args.modelpath)
+    print("Train loader foirst iteration")
+    train_iter = iter(train_loader)
+    batch = train_iter.next()
+    from schnorb import SchNOrbProperties
 
-        if not os.path.exists(args.modelpath):
-            os.makedirs(args.modelpath)
+    mean, stddev = train_loader.get_statistics(SchNOrbProperties.en_prop, True)
+    mean = mean[SchNOrbProperties.en_prop]
+    stddev = stddev[SchNOrbProperties.en_prop]
 
-        spk.utils.to_json(jsonpath, argparse_dict)
-        spk.utils.set_random_seed(args.seed)
-        train_args = args
-    else:
-        train_args = spk.utils.read_from_json(jsonpath)
 
-    properties = [
-        SchNOrbProperties.ham_prop,
-        SchNOrbProperties.ov_prop,
-        SchNOrbProperties.en_prop
-    ]
-    if train_args.forces:
-        properties.append(SchNOrbProperties.f_prop)
+    class Namespace:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
 
-    if train_args.aims:
-        rot = AimsRotator
-    else:
-        rot = OrcaRotator
 
-    hamiltonian_data = SchNOrbAtomsData(args.datapath,
-                                        load_only=properties,
-                                        add_rotations=train_args.rndrot,
-                                        rotator_cls=rot)
     basisdef = hamiltonian_data.get_metadata('basisdef')
-    basisdef = np.array(basisdef)
     orbital_energies = hamiltonian_data.get_metadata('orbital_energies')
-    orbital_energies = None if basisdef is None else np.array(orbital_energies)
+
+    train_args = Namespace(aims=False, baseline=False, batch_size=32, coupled=False,
+                           cuda=False, cutoff=10.0, cutoff_function='cosine',
+                           datapath='SchNorb/example_data/schnorb_hamiltonian_water.db',
+                           directions=12, factors=1000, forces=False, interactions=3,
+                           lmax=2, logger='csv', lr=0.0001, lr_decay=0.5, lr_min=1e-06,
+                           lr_patience=25, max_epochs=500000, minimal=False, mode='train',
+                           model='schnet', modelpath='models', orbbasis=1000, overwrite=False,
+                           pair_features=100, parallel=False, quambo=False,
+                           rndrot=False, seed=None, sgdr=False, split=[90, 10],
+                           split_path=None, t0=30, tmult=1, tpat=5)
+
+    model = get_model(train_args, basisdef,
+                      orbital_energies,
+                      mean, stddev, parallelize=False)
+
+    print(model)
+    
+
+    # parser = get_parser()
+    # args = parser.parse_args()
+    #
+    # argparse_dict = vars(args)
+    # jsonpath = os.path.join(args.modelpath, 'args.json')
+    #
+    # if args.mode == 'train':
+    #     if args.overwrite and os.path.exists(args.modelpath):
+    #         rmtree(args.modelpath)
+    #
+    #     if not os.path.exists(args.modelpath):
+    #         os.makedirs(args.modelpath)
+    #
+    #     spk.utils.to_json(jsonpath, argparse_dict)
+    #     spk.utils.set_random_seed(args.seed)
+    #     train_args = args
+    # else:
+    #     train_args = spk.utils.read_from_json(jsonpath)
+    #
+    # properties = [
+    #     SchNOrbProperties.ham_prop,
+    #     SchNOrbProperties.ov_prop,
+    #     SchNOrbProperties.en_prop
+    # ]
+    # if train_args.forces:
+    #     properties.append(SchNOrbProperties.f_prop)
+    #
+    # if train_args.aims:
+    #     rot = AimsRotator
+    # else:
+    #     rot = OrcaRotator
+    #
+    # hamiltonian_data = SchNOrbAtomsData(args.datapath,
+    #                                     load_only=properties,
+    #                                     add_rotations=train_args.rndrot,
+    #                                     rotator_cls=rot)
+    # basisdef = hamiltonian_data.get_metadata('basisdef')
+    # basisdef = np.array(basisdef)
+    # orbital_energies = hamiltonian_data.get_metadata('orbital_energies')
+    # orbital_energies = None if basisdef is None else np.array(orbital_energies)
 
     # split data
-    split_path = os.path.join(args.modelpath, 'split.npz')
-    if args.mode == 'train':
-        if args.split_path is not None:
-            copyfile(args.split_path, split_path)
+    # split_path = os.path.join(args.modelpath, 'split.npz')
+    # if args.mode == 'train':
+    #     if args.split_path is not None:
+    #         copyfile(args.split_path, split_path)
 
-    data_train, data_val, data_test = hamiltonian_data.create_splits(
-        *train_args.split, split_file=split_path)
+    # data_train, data_val, data_test = hamiltonian_data.create_splits(
+    #     *train_args.split, split_file=split_path)
+    #
+    # data_val.add_rotations = False
+    # data_test.add_rotations = False
+    #
+    # train_loader = spk.data.AtomsLoader(data_train, batch_size=args.batch_size,
+    #                                     sampler=RandomSampler(data_train),
+    #                                     num_workers=4, pin_memory=True)
+    #
+    # val_loader = spk.data.AtomsLoader(data_val, batch_size=args.batch_size,
+    #                                   num_workers=4, pin_memory=True)
 
-    data_val.add_rotations = False
-    data_test.add_rotations = False
-
-    train_loader = spk.data.AtomsLoader(data_train, batch_size=args.batch_size,
-                                        sampler=RandomSampler(data_train),
-                                        num_workers=4, pin_memory=True)
-
-    val_loader = spk.data.AtomsLoader(data_val, batch_size=args.batch_size,
-                                      num_workers=4, pin_memory=True)
-
-    if args.mode == 'train':
-        mean, stddev = train_loader.get_statistics(SchNOrbProperties.en_prop, True)
-        mean = mean[SchNOrbProperties.en_prop]
-        stddev = stddev[SchNOrbProperties.en_prop]
-    else:
-        mean, stddev = None, None
-
-    if args.mode == 'export':
-        export_model(args, basisdef, orbital_energies, mean, stddev)
-        sys.exit(0)
-
-    device = torch.device("cuda" if args.cuda else "cpu")
-
-    if args.mode == 'eval' or args.mode == 'pred':
-        model = torch.load(os.path.join(args.modelpath, 'best_model'))
-    else:
-        model = get_model(train_args, basisdef, orbital_energies,
-                          mean, stddev, parallelize=args.parallel).to(device)
-
-    print('Total params: %.2fM' % (
-            sum(p.numel() for p in model.parameters()) / 1000000.0))
-
-    if args.mode == 'train':
-        logging.info("Training...")
-        train(args, model, train_loader, val_loader, device)
-    elif args.mode == 'eval':
-        test_loader = spk.data.AtomsLoader(data_test,
-                                           batch_size=args.batch_size,
-                                           num_workers=2, pin_memory=True)
-        evaluate(args, model, train_loader, val_loader, test_loader, device)
-    elif args.mode == 'pred':
-        if args.split is None:
-            data_loader = spk.data.AtomsLoader(hamiltonian_data,
-                                               batch_size=args.batch_size,
-                                               num_workers=0, pin_memory=True)
-        elif args.split == 'test':
-            data_loader = spk.data.AtomsLoader(data_test,
-                                               batch_size=args.batch_size,
-                                               num_workers=2, pin_memory=True)
-        elif args.split == 'validation':
-            data_loader = val_loader
-        elif args.split == 'train':
-            data_loader = train_loader
-        else:
-            data_loader = None
-
-        results, inputs = predict_dataset(model, data_loader, device,
-                                          args.limit)
-        predict_file = os.path.join(args.modelpath, 'prediction.npz')
-        np.savez(predict_file, **results, **inputs)
-    else:
-        print('Unknown mode:', args.mode)
+    # if args.mode == 'train':
+    #     mean, stddev = train_loader.get_statistics(SchNOrbProperties.en_prop, True)
+    #     mean = mean[SchNOrbProperties.en_prop]
+    #     stddev = stddev[SchNOrbProperties.en_prop]
+    # else:
+    #     mean, stddev = None, None
+    #
+    # if args.mode == 'export':
+    #     export_model(args, basisdef, orbital_energies, mean, stddev)
+    #     sys.exit(0)
+    #
+    # device = torch.device("cuda" if args.cuda else "cpu")
+    #
+    # if args.mode == 'eval' or args.mode == 'pred':
+    #     model = torch.load(os.path.join(args.modelpath, 'best_model'))
+    # else:
+    #     model = get_model(train_args, basisdef, orbital_energies,
+    #                       mean, stddev, parallelize=args.parallel).to(device)
+    #
+    # print('Total params: %.2fM' % (
+    #         sum(p.numel() for p in model.parameters()) / 1000000.0))
+    #
+    # if args.mode == 'train':
+    #     logging.info("Training...")
+    #     train(args, model, train_loader, val_loader, device)
+    # elif args.mode == 'eval':
+    #     test_loader = spk.data.AtomsLoader(data_test,
+    #                                        batch_size=args.batch_size,
+    #                                        num_workers=2, pin_memory=True)
+    #     evaluate(args, model, train_loader, val_loader, test_loader, device)
+    # elif args.mode == 'pred':
+    #     if args.split is None:
+    #         data_loader = spk.data.AtomsLoader(hamiltonian_data,
+    #                                            batch_size=args.batch_size,
+    #                                            num_workers=0, pin_memory=True)
+    #     elif args.split == 'test':
+    #         data_loader = spk.data.AtomsLoader(data_test,
+    #                                            batch_size=args.batch_size,
+    #                                            num_workers=2, pin_memory=True)
+    #     elif args.split == 'validation':
+    #         data_loader = val_loader
+    #     elif args.split == 'train':
+    #         data_loader = train_loader
+    #     else:
+    #         data_loader = None
+    #
+    #     results, inputs = predict_dataset(model, data_loader, device,
+    #                                       args.limit)
+    #     predict_file = os.path.join(args.modelpath, 'prediction.npz')
+    #     np.savez(predict_file, **results, **inputs)
+    # else:
+    #     print('Unknown mode:', args.mode)

@@ -1,3 +1,5 @@
 quaternion>=3.5.2.post4
 spherical_functions
 schnetpack==0.3
+Cython>=0.29.27
+numpy>=1.22.2
