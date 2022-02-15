@@ -45,16 +45,15 @@ class SchNorbInteraction(nn.Module):
 
         super(SchNorbInteraction, self).__init__()
 
-        self.n_cosine_basis = n_cosine_basis
+        self.n_cosine_basis = n_cosine_basis  # B = features set size
         self._dims = dims
-        self.directions = directions
+        self.directions = directions  # `D` from the paper introduced along with omegas after Eq (22)
 
         self.cutoff_network = cutoff_network(cutoff)
 
         # initialize filters
         self.filter_network = nn.Sequential(
-            spk.nn.base.Dense(n_spatial_basis, n_factors,
-                              activation=spk.nn.activations.shifted_softplus),
+            spk.nn.base.Dense(n_spatial_basis, n_factors, activation=spk.nn.activations.shifted_softplus),
             spk.nn.base.Dense(n_factors, n_factors)
         )
 
@@ -63,20 +62,18 @@ class SchNorbInteraction(nn.Module):
                                self.filter_network,
                                cutoff_network=self.cutoff_network,
                                activation=spk.nn.activations.shifted_softplus)
+
         self.atomnet = nn.Sequential(
-            spk.nn.Dense(n_factors, n_factors,
-                         activation=spk.nn.activations.shifted_softplus),
+            spk.nn.Dense(n_factors, n_factors, activation=spk.nn.activations.shifted_softplus),
             spk.nn.Dense(n_factors, n_cosine_basis)
         )
 
         self.pairnet = nn.Sequential(
-            spk.nn.Dense(n_factors, n_factors,
-                         activation=spk.nn.activations.shifted_softplus),
+            spk.nn.Dense(n_factors, n_factors, activation=spk.nn.activations.shifted_softplus),
             spk.nn.Dense(n_factors, n_cosine_basis)
         )
         self.envnet = nn.Sequential(
-            spk.nn.Dense(n_factors, n_factors,
-                         activation=spk.nn.activations.shifted_softplus),
+            spk.nn.Dense(n_factors, n_factors, activation=spk.nn.activations.shifted_softplus),
             spk.nn.Dense(n_factors, n_cosine_basis)
         )
 
@@ -102,31 +99,38 @@ class SchNorbInteraction(nn.Module):
         Returns:
             torch.Tensor: SchNet representation.
         """
-        # xi: (1, 3, 1000)
-        # n_cosine_basis: 1000
-        # cos_ij: (1, 3, 2, 1) [batch, atoms, neighbors per atom, ???]
+        # neighbors: [batch, atoms, neighbors], a list of neighbors IDs for each atom, e.g. (1, 3, 2)
+        # n_cosine_basis: B, e.g. 1000
+        # todo: cos_ij: [batch, atoms, neighbors per atom, lambda-related???], e.g. (1, 3, 2, 1)
+        # r_ij: [batch, atoms, 2] positions of atoms
 
-        nbh_size = neighbors.size() # all pairs size
-        nbh = neighbors.view(-1, nbh_size[1] * nbh_size[2], 1, 1)  # [batch, all pairs, 1, 1]
-        nbh = nbh.expand(-1, -1, self.n_cosine_basis, cos_ij.shape[3])  # [batch, all pairs, emb. size, cosine values]
+        nbh_size = neighbors.size()  # all pairs size: [batch, atoms, neighbors]
+        nbh = neighbors.view(-1, nbh_size[1] * nbh_size[2], 1, 1)  # [batch, all possible pairs number, 1, 1]
+        nbh = nbh.expand(-1, -1, self.n_cosine_basis,
+                         cos_ij.shape[3])  # [batch, all possible pairs number, B, cosine values]
 
-        v = self.ftensor.forward(xi, r_ij, neighbors, neighbor_mask, f_ij=f_ij) # [batch, atoms, neighbors, embedding] -- embedding for each pair
+        # xi shape: [batch, atoms, B] e.g. (1, 3, 1000)
+        # f_ij: [batch, atoms, neighbors, 50]
+
+        # Equation (17). In the paper, `v` is `h_ij^\lambda`
+        v = self.ftensor.forward(xi, r_ij, neighbors, neighbor_mask, f_ij=f_ij)  # [batch, atoms, neighbors, B]
 
         # energy -----------------------------------------------------------------------------
 
         # atomic corrections
-        vi = self.agg(v, neighbor_mask)
-        vi = self.atomnet(vi) # [batch, atoms, embedding size]
+        vi = self.agg(v, neighbor_mask)  # [batch, atoms, B]; sum from Equation (19)
+        vi = self.atomnet(vi)  # [batch, atoms, B]; mlp from Equation (19)
 
         # hamiltonian --------------------------------------------------------------------------
 
         # cosine basis corrections
         # i-j interactions
-        vij = self.pairnet(v) # embds for pairs: [batch, atoms, neighbors, emb. size]
-        Vij = vij[:, :, :, :, None] * cos_ij[:, :, :, None, :] # pairs embeddings  [batch, atoms, neighbors, embeddings, values (size 1 and = 1 on step one; size = 3 for next steps)]
+        vij = self.pairnet(v)  # embds for pairs: [batch, atoms, neighbors, B]
+        Vij = vij[:, :, :, :, None] * cos_ij[:, :, :, None,
+                                      :]  # pairs embeddings  [batch, atoms, neighbors, embeddings, values (size 1 and = 1 on step one; size = 3 for next steps)]
 
         if self.directions is not None:
-            Vij = self.pairnet_mult(Vij) # w_ij = tensor product with W
+            Vij = self.pairnet_mult(Vij)  # w_ij = tensor product with W
 
         # Vij = Vij.reshape(Vij.shape[0], Vij.shape[1], Vij.shape[2],
         #                   Vij.shape[3]*Vij.shape[4])
@@ -134,13 +138,13 @@ class SchNorbInteraction(nn.Module):
         # # i-k/j-l interactions
         vik = self.envnet(v)  # [batch, atoms, neighbors, emb.size]
         vik = vik[:, :, :, :, None] * cos_ij[:, :, :, None, :]
-        Vik = vik * neighbor_mask[:, :, :, None, None] # [batch, atoms, embs, angles]
+        Vik = vik * neighbor_mask[:, :, :, None, None]  # [batch, atoms, embs, angles]
         Vik = self.pairagg(Vik)  # [batch, atoms, embs, angles]
 
         Vjl = torch.gather(Vik, 1, nbh)
         Vjl = Vjl.reshape(Vik.shape[0], nbh_size[1],
                           nbh_size[2], Vik.shape[2],
-                          Vik.shape[3]) # [batch, atoms, neighbors, embs, angles]
+                          Vik.shape[3])  # [batch, atoms, neighbors, embs, angles]
 
         if self.directions is not None:
             Vik = self.envnet_mult1(Vik)
@@ -152,10 +156,10 @@ class SchNorbInteraction(nn.Module):
         #                   Vjl.shape[3] * Vjl.shape[4])
 
         # Broadcasging.....
-        Vijkl = Vik[:, :, None] + Vjl # [batch, atoms, neighbors, emb. size, angles]
+        Vijkl = Vik[:, :, None] + Vjl  # [batch, atoms, neighbors, emb. size, angles]
 
         # # environment-corrected interaction
-        V = Vij + Vijkl # [batch, atoms, neighbors, emb. size, angles]
+        V = Vij + Vijkl  # [batch, atoms, neighbors, emb. size, angles]
         return vi, V  # , Vij
 
 
@@ -176,9 +180,7 @@ class SchNOrb(nn.Module):
 
         # distances
         self.distances = spk.nn.neighbors.AtomDistances(return_directions=True)
-        self.distance_expansion = spk.nn.acsf.GaussianSmearing(
-            0.0, cutoff, n_gaussians, trainable=trainable_gaussians
-        )
+        self.distance_expansion = spk.nn.acsf.GaussianSmearing(0.0, cutoff, n_gaussians, trainable=trainable_gaussians)
 
         ### interactions ###
         ## SchNet interaction ##
@@ -259,7 +261,7 @@ class SchNOrb(nn.Module):
         # atom environments (SchNet-style)
         for interaction in self.schnet_interactions:
             v = interaction(xi, r_ij, neighbors, neighbor_mask, f_ij=g_ij)
-            xi = xi + v
+            xi = xi + v  # Equation (18)
 
         # l=0
         v, V = self.first_interaction(xi, r_ij, ones, neighbors,
