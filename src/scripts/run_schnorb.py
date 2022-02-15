@@ -11,15 +11,24 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data.sampler import RandomSampler
 from shutil import copyfile, rmtree
+from torchviz import make_dot
 
+import sys
 from tqdm import tqdm
 
 import schnetpack as spk
-import schnorb as stl
 from schnetpack.atomistic import AtomisticModel
 from schnetpack.nn.cutoff import HardCutoff, CosineCutoff, MollifierCutoff
 from schnetpack.train import HeatmapMAE, MeanAbsoluteError, RootMeanSquaredError
 from schnetpack.utils import read_from_json
+
+sys.path.append("../dist/")
+sys.path.append("./")
+
+print(sys.path)
+# quit()
+
+import schnorb as stl
 from schnorb import SchNOrbProperties
 from schnorb.data import SchNOrbAtomsData
 from schnorb.rotations import OrcaRotator, AimsRotator
@@ -415,9 +424,11 @@ def get_model(train_args, basisdef, orbital_energies, mean, stddev,
                                 n_cosine_basis=train_args.orbbasis,
                                 n_gaussians=num_gaussians,
                                 cutoff_network=cutoff_network,
-                                coupled_interactions=args.coupled)
+                                coupled_interactions=train_args.coupled)
+
     print('SchNorb params: %.2fM' % (
             sum(p.numel() for p in schnorb.parameters()) / 1000000.0))
+
     hamiltonian = stl.model.Hamiltonian(basisdef,
                                         lmax=train_args.lmax,
                                         n_cosine_basis=train_args.orbbasis,
@@ -427,8 +438,9 @@ def get_model(train_args, basisdef, orbital_energies, mean, stddev,
                                         mean=mean, stddev=stddev,
                                         return_forces=train_args.forces,
                                         create_graph=train_args.forces)
-    print('Outnet params: %.2fM' % (
-            sum(p.numel() for p in hamiltonian.parameters()) / 1000000.0))
+
+    print('Outnet params: %.2fM' % (sum(p.numel() for p in hamiltonian.parameters()) / 1000000.0))
+
     schnorb = AtomisticModel(schnorb, hamiltonian)
 
     if parallelize:
@@ -438,6 +450,7 @@ def get_model(train_args, basisdef, orbital_energies, mean, stddev,
 
 
 def export_model(args, basisdef, orbital_energies, mean, stddev):
+
     jsonpath = os.path.join(args.modelpath, 'args.json')
     train_args = read_from_json(jsonpath)
     model = get_model(train_args, basisdef, orbital_energies, mean, stddev,
@@ -451,13 +464,14 @@ def export_model(args, basisdef, orbital_energies, mean, stddev):
 
 if __name__ == '__main__':
 
+    from schnorb import SchNOrbProperties
+
     hamiltonian_data = SchNOrbAtomsData("../example_data/h2o_hamiltonians.db")
     train_loader = spk.data.AtomsLoader(hamiltonian_data, batch_size=1, num_workers=1)
 
-    print("Train loader foirst iteration")
+    print("Train loader, reading a single batch")
     train_iter = iter(train_loader)
     batch = train_iter.next()
-    from schnorb import SchNOrbProperties
 
     mean, stddev = train_loader.get_statistics(SchNOrbProperties.en_prop, True)
     mean = mean[SchNOrbProperties.en_prop]
@@ -487,8 +501,9 @@ if __name__ == '__main__':
                       orbital_energies,
                       mean, stddev, parallelize=False)
 
-    print(model)
-    
+    y = model(batch)
+    g = make_dot(y["energy"], params=dict(model.named_parameters()), show_attrs=True)  # , show_saved=True)
+    g.render(filename='schnorb.svg')
 
     # parser = get_parser()
     # args = parser.parse_args()

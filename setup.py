@@ -20,16 +20,17 @@ setup(
     package_dir={'': 'src'},
     python_requires=">3.6",
     install_requires=[
-        "torch>=1.1",
+        "torch>=1.10",
         "numpy",
         "schnetpack>=0.3",
         "spherical_functions",
         "tqdm",
+        "quaternion"
     ],
     scripts=[
         "src/scripts/run_schnorb.py",
         "src/scripts/extract_data.py",
     ],
-    description='Unifying machine learning and quantum chemistry with a deep neural network for molecular wavefunctions',
+    description='Unifying ML and quantum chemistry with a deep NN for molecular wavefunctions.',
     long_description=read('README.md')
 )

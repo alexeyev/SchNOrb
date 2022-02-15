@@ -42,7 +42,9 @@ class SchNorbInteraction(nn.Module):
     def __init__(self, n_spatial_basis, n_factors, n_cosine_basis,
                  cutoff, cutoff_network,
                  normalize_filter=False, dims=3, directions=None):
+
         super(SchNorbInteraction, self).__init__()
+
         self.n_cosine_basis = n_cosine_basis
         self._dims = dims
         self.directions = directions
@@ -100,38 +102,45 @@ class SchNorbInteraction(nn.Module):
         Returns:
             torch.Tensor: SchNet representation.
         """
-        nbh_size = neighbors.size()
-        nbh = neighbors.view(-1, nbh_size[1] * nbh_size[2], 1, 1)
-        nbh = nbh.expand(-1, -1, self.n_cosine_basis, cos_ij.shape[3])
+        # xi: (1, 3, 1000)
+        # n_cosine_basis: 1000
+        # cos_ij: (1, 3, 2, 1) [batch, atoms, neighbors per atom, ???]
 
-        v = self.ftensor.forward(xi, r_ij, neighbors, neighbor_mask, f_ij=f_ij)
+        nbh_size = neighbors.size() # all pairs size
+        nbh = neighbors.view(-1, nbh_size[1] * nbh_size[2], 1, 1)  # [batch, all pairs, 1, 1]
+        nbh = nbh.expand(-1, -1, self.n_cosine_basis, cos_ij.shape[3])  # [batch, all pairs, emb. size, cosine values]
 
-        ## energy
+        v = self.ftensor.forward(xi, r_ij, neighbors, neighbor_mask, f_ij=f_ij) # [batch, atoms, neighbors, embedding] -- embedding for each pair
+
+        # energy -----------------------------------------------------------------------------
 
         # atomic corrections
         vi = self.agg(v, neighbor_mask)
-        vi = self.atomnet(vi)
+        vi = self.atomnet(vi) # [batch, atoms, embedding size]
 
-        ## hamiltonian
+        # hamiltonian --------------------------------------------------------------------------
 
         # cosine basis corrections
         # i-j interactions
-        vij = self.pairnet(v)
-        Vij = vij[:, :, :, :, None] * cos_ij[:, :, :, None, :]
+        vij = self.pairnet(v) # embds for pairs: [batch, atoms, neighbors, emb. size]
+        Vij = vij[:, :, :, :, None] * cos_ij[:, :, :, None, :] # pairs embeddings  [batch, atoms, neighbors, embeddings, values (size 1 and = 1 on step one; size = 3 for next steps)]
+
         if self.directions is not None:
-            Vij = self.pairnet_mult(Vij)
+            Vij = self.pairnet_mult(Vij) # w_ij = tensor product with W
+
         # Vij = Vij.reshape(Vij.shape[0], Vij.shape[1], Vij.shape[2],
         #                   Vij.shape[3]*Vij.shape[4])
 
         # # i-k/j-l interactions
-        vik = self.envnet(v)
+        vik = self.envnet(v)  # [batch, atoms, neighbors, emb.size]
         vik = vik[:, :, :, :, None] * cos_ij[:, :, :, None, :]
-        Vik = vik * neighbor_mask[:, :, :, None, None]
-        Vik = self.pairagg(Vik)
+        Vik = vik * neighbor_mask[:, :, :, None, None] # [batch, atoms, embs, angles]
+        Vik = self.pairagg(Vik)  # [batch, atoms, embs, angles]
+
         Vjl = torch.gather(Vik, 1, nbh)
         Vjl = Vjl.reshape(Vik.shape[0], nbh_size[1],
                           nbh_size[2], Vik.shape[2],
-                          Vik.shape[3])
+                          Vik.shape[3]) # [batch, atoms, neighbors, embs, angles]
 
         if self.directions is not None:
             Vik = self.envnet_mult1(Vik)
@@ -141,10 +150,12 @@ class SchNorbInteraction(nn.Module):
         #                   Vik.shape[2] * Vik.shape[3])
         # Vjl = Vjl.reshape(Vjl.shape[0], Vjl.shape[1], Vjl.shape[2],
         #                   Vjl.shape[3] * Vjl.shape[4])
-        Vijkl = Vik[:, :, None] + Vjl
+
+        # Broadcasging.....
+        Vijkl = Vik[:, :, None] + Vjl # [batch, atoms, neighbors, emb. size, angles]
 
         # # environment-corrected interaction
-        V = Vij + Vijkl
+        V = Vij + Vijkl # [batch, atoms, neighbors, emb. size, angles]
         return vi, V  # , Vij
 
 
@@ -335,6 +346,7 @@ class Hamiltonian(nn.Module):
         self.atomagg = spk.nn.Aggregate(axis=1, mean=False)
 
     def forward(self, inputs):
+
         Z = inputs['_atomic_numbers']
         nbh = inputs[SchNOrbProperties.neighbors]
         # nbhmask = inputs[Properties.neighbor_mask]

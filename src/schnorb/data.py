@@ -892,8 +892,8 @@ class OrcaPropertyParser:
 
 class SchNOrbAtomsData(spk.data.AtomsData):
 
-    def __init__(self, *args, add_rotations=True, rotator_cls=OrcaRotator,
-                 **kwargs):
+    def __init__(self, *args, add_rotations=True, rotator_cls=OrcaRotator, **kwargs):
+
         super(SchNOrbAtomsData, self).__init__(*args, **kwargs)
         self.args = args
         self.kwargs = kwargs
@@ -920,6 +920,7 @@ class SchNOrbAtomsData(spk.data.AtomsData):
             S = properties[SchNOrbProperties.ov_prop].numpy()
 
             isnan = True
+
             while isnan:
                 rnd_rot = rand_rotation_matrix()
 
