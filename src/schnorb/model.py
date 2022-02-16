@@ -311,9 +311,9 @@ class Hamiltonian(nn.Module):
 
         self.register_buffer('basis_definition',
                              torch.LongTensor(basis_definition))
-        self.n_types = self.basis_definition.shape[0]
-        self.n_orbs = self.basis_definition.shape[1]
-        self.n_cosine_basis = n_cosine_basis
+        self.n_types = self.basis_definition.shape[0] # e.g. 9 in water
+        self.n_orbs = self.basis_definition.shape[1] # e.g. 14 in water
+        self.n_cosine_basis = n_cosine_basis # = B in the paper (1000)
         self.quambo = quambo
 
         directions = directions if directions is not None else 3
@@ -360,7 +360,7 @@ class Hamiltonian(nn.Module):
         batch = Vijkl.shape[0]  # batch size
         max_atoms = Vijkl.shape[1]  # atoms
 
-        # self.basis_definition: [9, 14, 5] for H2O
+        # self.basis_definition: [types, orbs, lmax + 1], which is [9, 14, 5] for H2O
         orb_mask_i = self.basis_definition[:, :, 2] > 0
         orb_mask_i = orb_mask_i[Z].float()
         orb_mask_i = orb_mask_i.reshape(batch, -1, 1)
@@ -377,30 +377,36 @@ class Hamiltonian(nn.Module):
         # we append SELF to each list of neighbors (.sort to restore correct order)
         _, nbh = torch.cat([nbh, ar], dim=2).sort(dim=2)  # [batch, atoms, neighbors + 1]
 
-        Vijkl = Vijkl.reshape(Vijkl.shape[:3] + (-1,))
+        Vijkl = Vijkl.reshape(Vijkl.shape[:3] + (-1,)) # for H2O, this converts the 5x12000 matrix -> 60000 layer of tensor
 
-        H_off = self.offsitenet(Vijkl)
-        zeros = torch.zeros((batch, max_atoms, 1, self.n_orbs ** 2),
-                            device=H_off.device,
-                            dtype=H_off.dtype)
-        H_off = torch.cat([H_off, zeros], dim=2)
-        H_off = torch.gather(H_off, 2, nbh[..., None].expand(-1, -1, -1,
-                                                             self.n_orbs ** 2))
+        # applying a simple dense layer to the concatenated \Omegas
+        H_off = self.offsitenet(Vijkl) # [batch, atoms, neighbors, n_orbs * n_orbs], e.g. [batch, 3, 2, 196]
+        zeros = torch.zeros((batch, max_atoms, 1, self.n_orbs ** 2), device=H_off.device, dtype=H_off.dtype)
+        H_off = torch.cat([H_off, zeros], dim=2) # [batch, atoms, neighbors + 1, n_orbs * n_orbs]
 
-        H_on = self.onsitenet(Vijkl)
-        H_on = self.pairagg(H_on)
-        id = torch.eye(max_atoms, device=H_on.device, dtype=H_on.dtype)[
-            None, ..., None]
-        H_on = id * H_on[:, :, None]
+        # nbh[..., None] just adds one more dimension to the neighbors list (extended previously with selves)
+        # .expand() here replicates the values along the last dimension `n_orbs * n_orbs` times:
+        #       [batch, atoms, neighbors + 1, n_orbs * n_orbs], where each neighbor ID is converted to the vector
+        #       of the size n_orbs * n_orbs filled with the same ID
+        #       (todo: i'm not sure i understand why this does what we need)
+        # Supposed to be the 'applying H_off network to concatenated Omegas and summing' for i <> j (page 8)
+        # H_off: [batch, atoms, neighbors + 1, n_orbs * n_orbs]
+        H_off = torch.gather(H_off, dim=2, index=nbh[..., None].expand(-1, -1, -1, self.n_orbs ** 2))
+
+        H_on = self.onsitenet(Vijkl)  # [batch, atoms, neighbors, n_orbs * n_orbs]
+        H_on = self.pairagg(H_on)  # [batch, atoms, n_orbs * n_orbs]
+        id = torch.eye(max_atoms, device=H_on.device, dtype=H_on.dtype)[None, ..., None]  # [1, atoms, atoms, 1]
+        # shape of H_on[:, :, None] is [batch, atoms, 1, n_orbs * n_orbs]
+        # zeroing out every (n_orbs * n_orbs)-size vector NOT on the main diagonal
+        H_on = id * H_on[:, :, None] # [batch, atoms, atoms, n_orbs * n_orbs]
 
         H = H_off + H_on
 
-        H = H.reshape(batch, max_atoms, max_atoms, self.n_orbs,
-                      self.n_orbs).permute((0, 1, 3, 2, 4))
+        H = H.reshape(batch, max_atoms, max_atoms, self.n_orbs, self.n_orbs).permute((0, 1, 3, 2, 4))
         H = H.reshape(batch, max_atoms * self.n_orbs, max_atoms * self.n_orbs)
 
         # symmetrize
-        H = 0.5 * (H + H.permute((0, 2, 1)))
+        H = 0.5 * (H + H.permute((0, 2, 1))) # Equation (23)
 
         # mask padded orbitals
         H = torch.masked_select(H, orb_mask > 0)
