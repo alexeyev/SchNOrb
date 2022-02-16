@@ -502,8 +502,8 @@ if __name__ == '__main__':
                       mean, stddev, parallelize=False)
 
     y = model(batch)
-    g = make_dot(y["energy"], params=dict(model.named_parameters()), show_attrs=True)  # , show_saved=True)
-    g.render(filename='schnorb.svg')
+    # g = make_dot(y["energy"], params=dict(model.named_parameters()), show_attrs=True)  # , show_saved=True)
+    # g.render(filename='schnorb.svg')
 
     # parser = get_parser()
     # args = parser.parse_args()

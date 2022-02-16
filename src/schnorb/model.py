@@ -307,8 +307,7 @@ class Hamiltonian(nn.Module):
             self.h0 = None
         else:
             self.h0 = SingleAtomHamiltonian(orbital_energies, True)
-            self.s0 = SingleAtomHamiltonian(np.ones_like(orbital_energies),
-                                            True)
+            self.s0 = SingleAtomHamiltonian(np.ones_like(orbital_energies), True)
 
         self.register_buffer('basis_definition',
                              torch.LongTensor(basis_definition))
@@ -349,25 +348,34 @@ class Hamiltonian(nn.Module):
 
     def forward(self, inputs):
 
-        Z = inputs['_atomic_numbers']
-        nbh = inputs[SchNOrbProperties.neighbors]
+        Z = inputs['_atomic_numbers'] # [batch, atoms]
+        nbh = inputs[SchNOrbProperties.neighbors] # [batch, atoms, neighbors] -- neighbors IDs for each atom
         # nbhmask = inputs[Properties.neighbor_mask]
-        x0, x, Vijkl = inputs['representation']
+        x0, x, Vijkl = inputs['representation'] # outputs of the previous layer
 
-        # Vijkl shape: batch, max_atoms, max_nbh, max_lr, feats
+        # Vijkl shape: [batch, atoms, neighbors, max_lr (5 for H2O), feats=3*D*B]
+        # x0: [batch, atoms, B]
+        # x: [batch, atoms, B]
 
-        batch = Vijkl.shape[0]
-        max_atoms = Vijkl.shape[1]
+        batch = Vijkl.shape[0]  # batch size
+        max_atoms = Vijkl.shape[1]  # atoms
 
+        # self.basis_definition: [9, 14, 5] for H2O
         orb_mask_i = self.basis_definition[:, :, 2] > 0
         orb_mask_i = orb_mask_i[Z].float()
         orb_mask_i = orb_mask_i.reshape(batch, -1, 1)
         orb_mask_j = orb_mask_i.reshape(batch, 1, -1)
+
+        # orb_mask_i: [batch, 42, 1] for H2O
+        # orb_mask_j: [batch, 1, 42] for H2O
+        # orb_mask: [batch, 42, 42] for H2O
         orb_mask = orb_mask_i * orb_mask_j
 
-        ar = torch.arange(max_atoms, device=nbh.device)[None, :, None].expand(
-            nbh.shape[0], -1, 1)
-        _, nbh = torch.cat([nbh, ar], dim=2).sort(dim=2)
+        ar = torch.arange(max_atoms, device=nbh.device)[None, :, None]
+        ar = ar.expand(nbh.shape[0], -1, 1)  # [batch, atoms, 1], consecutive indices from 0 to `atoms` for each batch
+
+        # we append SELF to each list of neighbors (.sort to restore correct order)
+        _, nbh = torch.cat([nbh, ar], dim=2).sort(dim=2)  # [batch, atoms, neighbors + 1]
 
         Vijkl = Vijkl.reshape(Vijkl.shape[:3] + (-1,))
 
