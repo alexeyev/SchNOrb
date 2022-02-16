@@ -21,5 +21,8 @@ python src/scripts/run_schnorb.py train  schnet  example_data/h2o_hamiltonians.d
 
 ```bash
 cd SchNOrb
-
+docker build -t schnorb . 
+nvidia-docker run -v /home/aam/SchNOrb/:/root/SchNOrb/ -it -p 8805:8805 schnorb:latest bash
+cd /root/SchNOrb/src
+python scripts/run_schnorb.py
 ```
